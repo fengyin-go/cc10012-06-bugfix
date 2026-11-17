@@ -24,6 +24,51 @@
       </span>
     </p>
 
+    <!-- 下游导出入口：直接读取数据源接入模块归档的可回读清单数据表 -->
+    <section class="manifest-panel">
+      <header class="manifest-head">
+        <h3>下游引用：可回读的接入配置清单数据表</h3>
+        <span v-if="sourceManifest" class="legend-item">
+          {{ sourceManifest.status }} ｜ v{{ sourceManifest.version }} ｜
+          分隔规则：{{ sourceManifest.delimiterName }} ｜ {{ sourceManifest.rowCount }} 行 × {{ sourceManifest.columnCount }} 列
+        </span>
+      </header>
+
+      <p v-if="!sourceManifest" class="empty-state">
+        数据源接入模块尚未生成清单数据表，请先到「数据源接入」页面导出清单。
+      </p>
+
+      <div v-else class="manifest-body">
+        <div class="manifest-meta">
+          <span>来源文件：{{ sourceManifest.filename }}</span>
+          <span>校验和：{{ sourceManifest.checksum }}</span>
+          <span
+            :class="sourceConsistent === true ? 'ok-text' : sourceConsistent === false ? 'error-text' : ''"
+          >
+            导出结果与清单记录一致：{{ sourceConsistent === null ? '待核对' : sourceConsistent ? '是' : '否' }}
+          </span>
+        </div>
+        <div class="manifest-actions">
+          <button class="btn" type="button" @click="downloadSourceManifest">下载引用的接入清单文件</button>
+          <button class="btn ghost" type="button" @click="reloadSourceManifest">重新核对</button>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th v-for="column in sourceManifest.header" :key="column">{{ column }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, rowIndex) in sourceManifest.rows" :key="rowIndex">
+              <td v-for="(cell, cellIndex) in row" :key="cellIndex" class="manifest-cell">
+                {{ cell === '' ? '（空）' : cell }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <form class="filter-bar" @submit.prevent="reload">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
@@ -66,6 +111,7 @@
     <footer class="page-foot">
       <span>共 {{ total }} 条数据导出记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
+      <span v-if="infoMessage" class="ok-text">{{ infoMessage }}</span>
     </footer>
   </section>
 </template>
@@ -74,12 +120,15 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  checkManifest,
   downloadEntries,
   listEntries,
   moduleMeta,
+  readManifest,
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
+import type { ManifestRecord } from '@/data/manifest-store'
 
 const meta = moduleMeta('export')
 const columns = ["任务编号", "查询SQL", "导出格式", "字段列表", "分隔符", "编码格式", "压缩方式", "目标路径"]
@@ -90,14 +139,45 @@ const stats = [{"label": "导出任务总数", "value": 0}, {"label": "执行中
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
+const infoMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const sourceManifest = ref<ManifestRecord | null>(null)
+const sourceConsistent = ref<boolean | null>(null)
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+
+function reloadSourceManifest() {
+  errorMessage.value = ''
+  sourceManifest.value = readManifest('source')
+  if (!sourceManifest.value) {
+    sourceConsistent.value = null
+    return
+  }
+  try {
+    // 下游引用前再回读一次：两种读法列数一致且与来源页面明细一致才放行。
+    const result = checkManifest('source')
+    sourceConsistent.value = result.verify.consistent && result.pageConsistent
+  } catch (error) {
+    sourceConsistent.value = false
+    errorMessage.value = error instanceof Error ? error.message : '接入清单回读失败'
+  }
+}
+
+async function downloadSourceManifest() {
+  errorMessage.value = ''
+  try {
+    // 下游文件由导出入口读取可回读清单数据表，不重新拼接。
+    await downloadEntries('source')
+    infoMessage.value = '已按清单数据表中的分隔规则导出接入配置清单文件'
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '导出失败'
+  }
+}
 
 function resetFilters() {
   filters.value = {}
@@ -133,5 +213,50 @@ function reload() {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  reload()
+  reloadSourceManifest()
+})
 </script>
+
+<style scoped>
+.manifest-panel {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.manifest-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.manifest-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.manifest-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.manifest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.manifest-cell {
+  white-space: pre-line;
+}
+.ok-text {
+  color: #067647;
+}
+</style>

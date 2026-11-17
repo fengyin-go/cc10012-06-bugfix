@@ -1,0 +1,5 @@
+﻿# 分隔规则声明: 分隔符=制表符(Tab) 双引号转义=是 列数=10
+编号	配置编号	连接类型	接入地址	认证凭证	连接池大小	超时秒数	重试上限	负责人	当前状态
+1	SOUR-0001	JDBC	jdbc:mysql://10.0.0.1:3306,10.0.0.2:3306/warehouse?useSSL=false		10	30	3	王敏	草稿
+2	SOUR-0002	REST API	"https://api.example.cn/v2/sales\n备用: https://bak.example.cn/v2/sales"	Bearer token-0002		15	2	李强	待校验
+3	SOUR-0003	Kafka	kafka-01:9092,kafka-02:9092,kafka-03:9092/topic-orders	"SASL ""plain"" 凭证"	20	10	5	赵磊	已连接

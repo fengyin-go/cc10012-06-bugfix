@@ -24,6 +24,43 @@
       </span>
     </p>
 
+    <!-- 数据集管理引用的来源配置：直接读取数据源接入模块的可回读清单数据表 -->
+    <section class="manifest-panel">
+      <header class="manifest-head">
+        <h3>引用来源：可回读的接入配置清单数据表</h3>
+        <span v-if="sourceManifest" class="legend-item">
+          {{ sourceManifest.status }} ｜ v{{ sourceManifest.version }} ｜
+          分隔规则：{{ sourceManifest.delimiterName }} ｜ {{ sourceManifest.rowCount }} 行 × {{ sourceManifest.columnCount }} 列
+        </span>
+      </header>
+      <p v-if="!sourceManifest" class="empty-state">
+        数据源接入模块尚未生成清单数据表，数据集定义暂无已核对的来源配置可引用。
+      </p>
+      <div v-else>
+        <p class="manifest-meta">
+          来源文件：{{ sourceManifest.filename }} ｜
+          两种读法列数一致且与页面明细对齐：
+          <strong :class="sourceConsistent ? 'ok-text' : 'error-text'">
+            {{ sourceConsistent ? '是' : '否' }}
+          </strong>
+        </p>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th v-for="column in sourceColumns" :key="column">{{ column }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, rowIndex) in sourceRows" :key="rowIndex">
+              <td v-for="column in sourceColumns" :key="column" class="manifest-cell">
+                {{ row[sourceHeaderIndex[column]] === '' ? '（空）' : row[sourceHeaderIndex[column]] }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <form class="filter-bar" @submit.prevent="reload">
       <label v-for="field in filterFields" :key="field" class="filter-item">
         <span>{{ field }}</span>
@@ -74,12 +111,15 @@
 import { computed, onMounted, ref } from 'vue'
 
 import {
+  checkManifest,
   downloadEntries,
   listEntries,
   moduleMeta,
+  readManifest,
   runAction as applyAction,
 } from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
+import type { ManifestRecord } from '@/data/manifest-store'
 
 const meta = moduleMeta('datastore')
 const columns = ["数据集编号", "数据集名称", "来源表名", "字段列表", "更新策略", "数据采样比例", "生命周期天数", "缓存开关"]
@@ -92,6 +132,34 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+// 来源配置引用：只读数据源接入模块已落库的清单数据表，避免引用错位的来源配置。
+const sourceManifest = ref<ManifestRecord | null>(null)
+const sourceConsistent = ref(false)
+const sourceColumns = ["配置编号", "连接类型", "接入地址", "负责人"]
+const sourceHeaderIndex = computed<Record<string, number>>(() => {
+  const indexMap: Record<string, number> = {}
+  for (const column of sourceColumns) {
+    indexMap[column] = sourceManifest.value?.header.indexOf(column) ?? -1
+  }
+  return indexMap
+})
+const sourceRows = computed(() => sourceManifest.value?.rows ?? [])
+
+function reloadSourceManifest() {
+  sourceManifest.value = readManifest('source')
+  if (!sourceManifest.value) {
+    sourceConsistent.value = false
+    return
+  }
+  try {
+    const result = checkManifest('source')
+    sourceConsistent.value = result.verify.consistent && result.pageConsistent
+  } catch {
+    sourceConsistent.value = false
+  }
+}
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -133,5 +201,43 @@ function reload() {
   }
 }
 
-onMounted(reload)
+onMounted(() => {
+  reload()
+  reloadSourceManifest()
+})
 </script>
+
+<style scoped>
+.manifest-panel {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.manifest-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.manifest-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.manifest-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.manifest-cell {
+  white-space: pre-line;
+}
+.ok-text {
+  color: #067647;
+}
+.error-text {
+  color: #b42318;
+}
+</style>
